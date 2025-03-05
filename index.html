@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>方块消消乐</title>
+    <style>
+        canvas {
+            border: 2px solid #333;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <div style="height: 100px;"></div>
+    <div id="Title" style="font-size: 24px; font-weight: bold;">欢迎来到俄罗斯消消乐</div>
+    <div id="Help">左右箭头移动，上箭头旋转，下箭头加速下落</div>
+    <div id="score">得分: 0</div>
+
+    <div style="height: 30px;"></div>
+    <canvas id="gameCanvas" width="300" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const COLS = 10;
+        const ROWS = 20;
+        const BLOCK_SIZE = 30;
+        const COLORS = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF'];
+        const SHAPES = [
+            [[1,1,1,1]],          // I
+            [[1,1], [1,1]],       // O
+            [[1,1,1], [0,1,0]],   // T
+            [[1,1,1], [1,0,0]],   // L
+            [[1,1,1], [0,0,1]],   // J
+            [[1,1,0], [0,1,1]],   // S
+            [[0,1,1], [1,1,0]]    // Z
+        ];
+
+        let gameArea = Array(ROWS).fill().map(() => Array(COLS).fill(null));
+        let currentBlock = null;
+        let score = 0;
+        let gameLoop;
+        let gameSpeed = 1000;
+
+        	        // 新增旋转函数
+        function rotateClockwise(matrix) {
+            const N = matrix.length;
+            const M = matrix[0].length;
+            let rotated = [];
+            for (let x = 0; x < M; x++) {
+                let newRow = [];
+                for (let y = N - 1; y >= 0; y--) {
+                    newRow.push(matrix[y][x]);
+                }
+                rotated.push(newRow);
+            }
+            return rotated;
+        }
+
+        class Block {
+            constructor() {
+                const shapeIndex = Math.floor(Math.random() * SHAPES.length);
+                this.shape = SHAPES[shapeIndex];
+                this.colorMatrix = [];
+                
+                for (let y = 0; y < this.shape.length; y++) {
+                    let row = [];
+                    for (let x = 0; x < this.shape[y].length; x++) {
+                        row.push(this.shape[y][x] ? COLORS[Math.floor(Math.random() * COLORS.length)] : null);
+                    }
+                    this.colorMatrix.push(row);
+                }
+                
+                this.x = Math.floor(COLS/2) - Math.floor(this.shape[0].length/2);
+                this.y = 0;
+            }
+
+            // 新增旋转方法
+            rotate() {
+                const newShape = rotateClockwise(this.shape);
+                const newColorMatrix = rotateClockwise(this.colorMatrix);
+                
+                // 检测三种可能的位置：原位、左移、右移
+                const positions = [
+                    {x: this.x, y: this.y},
+                    {x: this.x - 1, y: this.y},
+                    {x: this.x + 1, y: this.y}
+                ];
+ 
+                for (let pos of positions) {
+                    if (!checkCollision(pos.x, pos.y, newShape)) {
+                        this.shape = newShape;
+                        this.colorMatrix = newColorMatrix;
+                        this.x = pos.x;
+                        this.y = pos.y;
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 绘制游戏区域
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    if (gameArea[y][x]) {
+                        ctx.fillStyle = gameArea[y][x];
+                        ctx.fillRect(x*BLOCK_SIZE, y*BLOCK_SIZE, BLOCK_SIZE-1, BLOCK_SIZE-1);
+                    }
+                }
+            }
+
+            // 绘制当前方块
+            if (currentBlock) {
+                ctx.fillStyle = '#999';
+                for (let y = 0; y < currentBlock.shape.length; y++) {
+                    for (let x = 0; x < currentBlock.shape[y].length; x++) {
+                        if (currentBlock.shape[y][x]) {
+                            ctx.fillStyle = currentBlock.colorMatrix[y][x];
+                            ctx.fillRect(
+                                (currentBlock.x + x) * BLOCK_SIZE,
+                                (currentBlock.y + y) * BLOCK_SIZE,
+                                BLOCK_SIZE-1,
+                                BLOCK_SIZE-1
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        function checkCollision_old(newX, newY) {
+            for (let y = 0; y < currentBlock.shape.length; y++) {
+                for (let x = 0; x < currentBlock.shape[y].length; x++) {
+                    if (currentBlock.shape[y][x]) {
+                        const gy = newY + y;
+                        const gx = newX + x;
+                        
+                        if (gx < 0 || gx >= COLS || gy >= ROWS) return true;
+                        if (gy >= 0 && gameArea[gy][gx]) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function checkCollision(newX, newY, shape) {
+            for (let y = 0; y < shape.length; y++) {
+                for (let x = 0; x < shape[y].length; x++) {
+                    if (shape[y][x]) {
+                        const gy = newY + y;
+                        const gx = newX + x;
+                        if (gx < 0 || gx >= COLS || gy >= ROWS) return true;
+                        if (gy >= 0 && gameArea[gy][gx]) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function mergeBlock() {
+            for (let y = 0; y < currentBlock.shape.length; y++) {
+                for (let x = 0; x < currentBlock.shape[y].length; x++) {
+                    if (currentBlock.shape[y][x]) {
+                        const gy = currentBlock.y + y;
+                        const gx = currentBlock.x + x;
+                        if (gy >= 0 && gx >= 0 && gx < COLS) {
+                            gameArea[gy][gx] = currentBlock.colorMatrix[y][x];
+                        }
+                    }
+                }
+            }
+        }
+
+        function checkLineClears() {
+            let linesCleared = 0;
+            for (let y = ROWS-1; y >= 0; y--) {
+                if (gameArea[y].every(cell => cell !== null)) {
+                    gameArea.splice(y, 1);
+                    gameArea.unshift(Array(COLS).fill(null));
+                    linesCleared++;
+                }
+            }
+            if (linesCleared) {
+                score += linesCleared * 100;
+                document.getElementById('score').textContent = `得分: ${score}`;
+            }
+            return linesCleared > 0;
+        }
+
+        function checkColorClears() {
+            let clearedCells = [];
+            
+            // 检查水平方向
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS-2; x++) {
+                    if (gameArea[y][x] && 
+                        gameArea[y][x] === gameArea[y][x+1] && 
+                        gameArea[y][x] === gameArea[y][x+2]) {
+                        clearedCells.push(...[[x,y], [x+1,y], [x+2,y]]);
+                    }
+                }
+            }
+
+            // 检查垂直方向
+            for (let x = 0; x < COLS; x++) {
+                for (let y = 0; y < ROWS-2; y++) {
+                    if (gameArea[y][x] && 
+                        gameArea[y][x] === gameArea[y+1][x] && 
+                        gameArea[y][x] === gameArea[y+2][x]) {
+                        clearedCells.push(...[[x,y], [x,y+1], [x,y+2]]);
+                    }
+                }
+            }
+
+            // 消除重复单元格
+            clearedCells = clearedCells.filter((v,i,a) => 
+                a.findIndex(t => t[0] === v[0] && t[1] === v[1]) === i
+            );
+
+            if (clearedCells.length > 0) {
+                clearedCells.forEach(([x,y]) => gameArea[y][x] = null);
+                score += clearedCells.length * 50;
+                document.getElementById('score').textContent = `得分: ${score}`;
+                return true;
+            }
+            return false;
+        }
+
+        function applyGravity() {
+            for (let y = ROWS-1; y >= 0; y--) {
+                for (let x = 0; x < COLS; x++) {
+                    if (!gameArea[y][x]) {
+                        for (let y2 = y-1; y2 >= 0; y2--) {
+                            if (gameArea[y2][x]) {
+                                gameArea[y][x] = gameArea[y2][x];
+                                gameArea[y2][x] = null;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function checkAllClears() {
+            let hasCleared = false;
+            do {
+                const lineCleared = checkLineClears();
+                const colorCleared = checkColorClears();
+                hasCleared = lineCleared || colorCleared;
+                if (hasCleared) applyGravity();
+            } while (hasCleared);
+        }
+
+        function gameOver() {
+            clearInterval(gameLoop);
+            alert(`游戏结束！得分: ${score}`);
+            document.location.reload();
+        }
+
+        function update_old() {
+            if (!currentBlock) {
+                currentBlock = new Block();
+                if (checkCollision(currentBlock.x, currentBlock.y)) {
+                    gameOver();
+                    return;
+                }
+            }
+
+            if (!checkCollision(currentBlock.x, currentBlock.y + 1)) {
+                currentBlock.y++;
+            } else {
+                mergeBlock();
+                checkAllClears();
+                currentBlock = null;
+            }
+            draw();
+        }
+        function update() {
+            if (!currentBlock) {
+                currentBlock = new Block();
+                if (checkCollision(currentBlock.x, currentBlock.y, currentBlock.shape)) {
+                    gameOver();
+                    return;
+                }
+            }
+ 
+            if (!checkCollision(currentBlock.x, currentBlock.y + 1, currentBlock.shape)) {
+                currentBlock.y++;
+            } else {
+                mergeBlock();
+                checkAllClears();
+                currentBlock = null;
+            }
+            draw();
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (!currentBlock) return;
+
+            switch(e.key) {
+                case 'ArrowLeft':
+                    if (!checkCollision(currentBlock.x - 1, currentBlock.y, currentBlock.shape)) {
+                        currentBlock.x--;
+                        draw();
+                    }
+                    break;
+                case 'ArrowRight':
+                    if (!checkCollision(currentBlock.x + 1, currentBlock.y, currentBlock.shape)) {
+                        currentBlock.x++;
+                        draw();
+                    }
+                    break;
+                case 'ArrowDown':
+                    if (!checkCollision(currentBlock.x, currentBlock.y + 1, currentBlock.shape)) {
+                        currentBlock.y++;
+                        draw();
+                    }
+                    break;
+                case 'ArrowUp':  // 新增旋转处理
+                    currentBlock.rotate();
+                    draw();
+                    break;
+            }
+        });
+
+        // 开始游戏
+        gameLoop = setInterval(update, gameSpeed);
+    </script>
+</body>
+</html>
